@@ -67,6 +67,34 @@ pad_vertical_videos()
   done
 }
 
+resize_to_640x352()
+{
+  echo "Resizing to 640x352..."
+  for video in tmp/backup/*.mp4; do
+    filename=$(basename "${video}")
+    ffmpeg -y -i "${video}" -vf scale=640:352,setsar=1:1 "tmp/desktop/${filename}" >/dev/null 2>&1
+  done
+  backup "tmp/desktop"
+}
+
+add_date_label()
+{
+  echo "Adding a date label for each video..."
+  for video in tmp/backup/*.mp4; do
+    filename=$(basename "${video}")
+    pattern="([0-9]{4})_([0-9]{2})_([0-9]{2}).*"
+    if [[ $filename =~ $pattern ]]; then
+      year=${BASH_REMATCH[1]}
+      month=${BASH_REMATCH[2]}
+      day=${BASH_REMATCH[3]}
+      ffmpeg -y -i "${video}" -vf drawtext="fontfile=/path/to/font.ttf: \
+         text='${day}/${month}/${year}': fontcolor=white: fontsize=20: box=1: boxcolor=black@0.7: \
+         boxborderw=5: x=(w-text_w)/2: y=(h-text_h)" -codec:a copy "tmp/desktop/${filename}" >/dev/null 2>&1
+    fi
+  done
+  backup "tmp/desktop"
+}
+
 generate_ts()
 {
   echo "Generating intermediary format..."
@@ -90,7 +118,6 @@ concat_videos()
   eval $command
 }
 
-
 main()
 {
   clear
@@ -99,6 +126,8 @@ main()
   fix_dates # adjust past midnight videos
   cut_videos # cut all videos to 1 second
   pad_vertical_videos
+  resize_to_640x352
+  add_date_label
   generate_ts # intermediary format for concatenation
   concat_videos
   clear
