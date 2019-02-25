@@ -5,15 +5,19 @@ clear()
 
 setup()
 {
-  mkdir -p tmp/sorted
-  mkdir -p tmp/cutted
-  mkdir -p tmp/ts
+  mkdir -p tmp/backup
+  mkdir -p tmp/desktop
+}
+
+backup()
+{
+  cp -r $1/* tmp/backup
 }
 
 fix_dates()
 {
   pattern="WhatsApp Video ([0-9]{4})-([0-9]{2})-([0-9]{2}) at ([0-9]+)\.([0-9]{2})\.([0-9]{2}) ([A-Z]{2}).mp4"
-  for video in videos/*.mp4; do
+  for video in tmp/backup/*.mp4; do
     filename=$(basename "${video}")
     if [[ $filename =~ $pattern ]]; then
       year=${BASH_REMATCH[1]}
@@ -29,51 +33,72 @@ fix_dates()
         second="59"
         day=$((day-1))
       fi
-      cp "${video}" "tmp/sorted/${year}_${month}_${day}_${hour}_${minute}_${second}_${am_pm}.mp4"
+      mv "${video}" "tmp/backup/${year}_${month}_${day}_${hour}_${minute}_${second}_${am_pm}.mp4"
     else
       echo "DOES NOT MATCH $filename"
       exit 1;
     fi
-  done   
+  done
 }
 
 cut_videos()
 {
-  echo "Cutting all videos to 1 second...\n"
-  for video in tmp/sorted/*.mp4; do
+  echo "Cutting all videos to 1 second..."
+  for video in tmp/backup/*.mp4; do
     filename=$(basename "${video}")
-    ffmpeg -i "${video}" -ss 00:00:00 -t 00:00:01 -async 1 -strict -2 "tmp/cutted/${filename}" >/dev/null 2>&1
+    ffmpeg -i "${video}" -ss 00:00:00 -t 00:00:01 -async 1 -strict -2 "tmp/desktop/${filename}" >/dev/null 2>&1
+  done
+  backup "tmp/desktop"
+}
+
+pad_vertical_videos()
+{
+  echo "Padding vertical videos to fit horizontal size..."
+  for video in tmp/backup/*.mp4; do
+    filename=$(basename "${video}")
+    width=$(ffprobe -v quiet -print_format json -show_format -show_streams "${video}" | jq -r ".streams[0].width")
+    height=$(ffprobe -v quiet -print_format json -show_format -show_streams "${video}" | jq -r ".streams[0].height")
+    if [ $height -gt $width ]; then
+      new_height=352
+      new_width=196
+      ffmpeg -y -i "${video}" -vf scale=196:352,setsar=1:1 "tmp/desktop/${filename}" >/dev/null 2>&1
+      ffmpeg -y -i "tmp/desktop/${filename}" -vf "pad=width=640:height=352:x=222:y=0:color=black" "${video}" >/dev/null 2>&1
+    fi
   done
 }
 
 generate_ts()
 {
-  echo "Generating intermediary format...\n"
-  for video in tmp/cutted/*.mp4; do
+  echo "Generating intermediary format..."
+  for video in tmp/backup/*.mp4; do
     filename=$(basename "${video}")
     filename="${filename%.*}" # get rid of extension
     filename="${filename}.ts" # add .ts extension
-    ffmpeg -i "${video}" -c copy -bsf:v h264_mp4toannexb -f mpegts "tmp/ts/${filename}" >/dev/null 2>&1
+    ffmpeg -i "${video}" -c copy -bsf:v h264_mp4toannexb -f mpegts "tmp/desktop/${filename}" >/dev/null 2>&1
   done
+  backup "tmp/desktop"
 }
 
 concat_videos()
 {
-  echo "Concatenating videos...\n"
+  echo "Concatenating videos..."
   command="concat:"
-  for video in tmp/ts/*.ts; do
+  for video in tmp/backup/*.ts; do
     command="${command}${video}|"    
   done
   command="ffmpeg -y -i \"${command%?}\" -c copy -bsf:a aac_adtstoasc output.mp4 >/dev/null 2>&1"
   eval $command
 }
 
+
 main()
 {
   clear
   setup
+  backup "videos"
   fix_dates # adjust past midnight videos
   cut_videos # cut all videos to 1 second
+  pad_vertical_videos
   generate_ts # intermediary format for concatenation
   concat_videos
   clear
